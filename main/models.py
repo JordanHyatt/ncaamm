@@ -3,6 +3,7 @@ from django.conf import settings
 import pandas as pd
 from tqdm import tqdm
 import os
+from django.contrib.postgres.fields import HStoreField
 
 class City(models.Model):
     ''' Represents a city a game could be played in '''
@@ -277,6 +278,8 @@ class GameTeam(models.Model):
     loc = models.CharField(choices=LOC_CHOICES, max_length=10)
     result = models.CharField(choices=RESULT_CHOICES, max_length=10)
 
+    features = HStoreField(default=dict)
+
     class Meta:
         unique_together = ['game', 'team']
 
@@ -349,6 +352,10 @@ class GameTeam(models.Model):
                     gameteam=lgt, stat=gs, opp_stat=True,
                     defaults=dict(value=wval)
                 )
+
+    def save(self, *args,**kwargs):
+        if self.features == None: self.features = {}
+        super().save(*args,**kwargs)
 
     def __str__(self):
         return f'{self.game} | {self.team}'
