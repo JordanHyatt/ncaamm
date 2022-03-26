@@ -1,0 +1,15 @@
+code,desc
+Score,Score
+FGM,Field Goals Made
+FGA,Field Goals Attempted
+FGM3,3-Pt Field Goals Made
+FGA3,3-Pt Field Goals Attempted
+FTM,Free Throws Made
+FTA,Free Trows Attempted
+OR,Offensive Rebounds
+DR,Deffensive Rebounds
+Ast,Assists
+TO,Turn Overs
+Stl,Steals
+Blk,Blocks
+PF,Personal Fouls
