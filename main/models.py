@@ -238,6 +238,13 @@ class GameTeam(models.Model):
     def __str__(self):
         return f'{self.game} | {self.team}'
 
+    @static
+
+    @classmethod
+    def update_objs(cls):
+        files = ['MRegularSeasonDetailedResults.csv']
+        
+
 
 class GameStat(models.Model):
     ''' Represents a stat that can be given a value for any particular game '''
