@@ -277,8 +277,7 @@ class GameTeam(models.Model):
     opponent = models.ForeignKey('Team', on_delete=models.CASCADE, related_name='gameteam_opp_set')
     loc = models.CharField(choices=LOC_CHOICES, max_length=10)
     result = models.CharField(choices=RESULT_CHOICES, max_length=10)
-
-    features = HStoreField(default=dict)
+    features = HStoreField(default=dict, null=True)
 
     class Meta:
         unique_together = ['game', 'team']
@@ -355,6 +354,7 @@ class GameTeam(models.Model):
 
     def save(self, *args,**kwargs):
         if self.features == None: self.features = {}
+        
         super().save(*args,**kwargs)
 
     def __str__(self):
