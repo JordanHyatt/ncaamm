@@ -4,6 +4,8 @@ import pandas as pd
 from tqdm import tqdm
 import os
 from django.contrib.postgres.fields import HStoreField
+from django.db.models import *
+from django.db.models.functions import *
 
 class City(models.Model):
     ''' Represents a city a game could be played in '''
@@ -33,7 +35,6 @@ class Conference(models.Model):
     abbrv = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=200)
     
-
     @classmethod
     def update_objs(cls):
         ''' A method to update conferences from csv '''
@@ -198,9 +199,23 @@ class TeamRank(models.Model):
                 defaults=dict(season=season, rank=tup.OrdinalRank)
             )
 
+    @classmethod
+    def get_avg_rank(cls, team, day):
+        ''' Class method that returns the avg rank of a given team at a given season day '''
+        tr = cls.objects.filter(
+            team = team, season=day.season, ranking_day__day_num__lte=day.day_num 
+        ).order_by('-ranking_day__day_num').first()
+        if tr == None:
+            return
+        cd = tr.ranking_day
+        qs = cls.objects.filter(
+            team=team, ranking_day = cd
+        )
+        return qs.aggregate(val=Avg('rank'))['val']
+
+
     def __str__(self):
         return f'{self.ranking_day} | {self.team} | {self.system} | {self.rank}'
-
 
 
 class Game(models.Model):
@@ -258,14 +273,13 @@ class Game(models.Model):
         team2 = Team.objects.filter(kid=kid2).first()
         self.teams.add(*[team1, team2])
 
-
     def save(self, *args, **kwargs):
         self.get_season()
         super().save(*args, **kwargs)
         self.get_teams()
 
     def __str__(self):
-        return f'{self.day} | {self.teams.all()}'
+        return f'{self.day} | {self.teams.first()} vs {self.teams.last()}'
 
 
 class GameTeam(models.Model):
@@ -281,6 +295,7 @@ class GameTeam(models.Model):
 
     class Meta:
         unique_together = ['game', 'team']
+
 
     @staticmethod
     def df_generator():
@@ -352,9 +367,34 @@ class GameTeam(models.Model):
                     defaults=dict(value=wval)
                 )
 
+
+    def get_features(self):
+        ''' A method to derive potential ML features '''
+        self.features['avg_rank'] = TeamRank.get_avg_rank(team=self.team, day=self.game.day)
+        self.features['avg_rank_opp'] = TeamRank.get_avg_rank(team=self.opponent, day=self.game.day)
+
+        qs = GameTeamStat.objects.filter(
+            gameteam__game__season=self.game.season,
+            gameteam__game__day__day_num__lt=self.game.day.day_num,
+        )
+        bqs = qs.filter(gameteam__team = self.team)
+        bqso = qs.filter(gameteam__team = self.opponent)
+
+        for stat in GameStat.objects.all():
+            fs = [
+                (bqs,f'avg_{stat.code}',stat.code,False),
+                (bqs, f'avg_{stat.code}_opp', stat.code, True),
+                (bqso, f'opp_avg_{stat.code}', stat.code, False),
+                (bqso, f'opp_avg_{stat.code}_opp', stat.code, True),
+            ]
+            for tqs, key, code, opp_stat in fs:
+                self.features[key] = tqs.filter(stat__code=code, opp_stat=opp_stat).aggregate(val=Avg('value'))['val']        
+
+        
+
     def save(self, *args,**kwargs):
         if self.features == None: self.features = {}
-        
+        self.get_features()
         super().save(*args,**kwargs)
 
     def __str__(self):
