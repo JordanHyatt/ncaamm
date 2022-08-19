@@ -6,6 +6,8 @@ import os
 from django.contrib.postgres.fields import HStoreField
 from django.db.models import *
 from django.db.models.functions import *
+import datetime as dt
+from typing import TypeVar
 
 class City(models.Model):
     ''' Represents a city a game could be played in '''
@@ -70,6 +72,12 @@ class Season(models.Model):
                 )
             )
 
+    @property
+    def teams(self):
+        ''' Returns all the teams that have played in the given season '''
+        pks = GameTeam.objects.filter(game__season=self).order_by('team__pk').distinct('team__pk').values_list('team__pk', flat=True)
+        return Team.objects.filter(id__in=pks)
+
     def __str__(self):
         return f'{self.year}'
 
@@ -99,9 +107,19 @@ class SeasonDay(models.Model):
     ''' Represents a day during a season '''
     season = models.ForeignKey('Season', on_delete=models.CASCADE)
     day_num = models.IntegerField()
-
+    date = models.DateField(null=True, blank=True)
     class Meta:
         unique_together = ['season', 'day_num']
+
+    def get_date(self):
+        ''' Method to derive date attr '''
+        if self.date: 
+            return
+        self.date = self.season.sdate + dt.timedelta(self.day_num)
+
+    def save(self, *args, **kwargs):
+        self.get_date()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.season} | {self.day_num}'
@@ -229,10 +247,10 @@ class Game(models.Model):
     teams = models.ManyToManyField('Team')
     num_ot = models.IntegerField(null=True)
     game_type = models.CharField(choices=GT_CHOICES, max_length=10, null=True)
+    hypo = BooleanField(default=False) # A flag to indicate whether the game is hypothetical/future
 
     class Meta:
         unique_together = ['day', 'gid']
-
 
     @property
     def has_season(self):
@@ -282,6 +300,7 @@ class Game(models.Model):
         return f'{self.day} | {self.teams.first()} vs {self.teams.last()}'
 
 
+AnyGt = TypeVar('AnyGt', bound='GameTeam')
 class GameTeam(models.Model):
     ''' Represents a Game as it relates to a participating team '''
     RESULT_CHOICES = (('win','Win'),('loss','Loss'))
@@ -295,6 +314,24 @@ class GameTeam(models.Model):
 
     class Meta:
         unique_together = ['game', 'team']
+
+    @classmethod
+    def create_hypo_game(cls: type[AnyGt], team, opponent, date, game_type, loc='H', city=None) -> AnyGt:
+        ''' A classmethod to generate a hypothetical game that whoms outcome can be predicted '''
+        gid = f'{team.kid}_{opponent.kid}'
+        season = Season.objects.filter(
+            sdate__lte=date).order_by('-sdate').first()
+        day = SeasonDay.objects.filter(season=season, date=date).first()
+        game, _ = Game.objects.update_or_create(
+            day=day, gid=gid, hypo=True,
+            defaults=dict(city=city, game_type=game_type)
+        )
+
+        gamet, _ = cls.objects.update_or_create(
+            game=game, team=team, opponent=opponent,
+            defaults=dict(loc=loc)
+        )
+        return gamet
 
 
     @staticmethod
@@ -370,9 +407,18 @@ class GameTeam(models.Model):
 
     def get_features(self):
         ''' A method to derive potential ML features '''
+        ## Get Ranks
         self.features['avg_rank'] = TeamRank.get_avg_rank(team=self.team, day=self.game.day)
-        self.features['avg_rank_opp'] = TeamRank.get_avg_rank(team=self.opponent, day=self.game.day)
+        self.features['opp_avg_rank'] = TeamRank.get_avg_rank(team=self.opponent, day=self.game.day)
 
+        ## Get Conferences
+        tc = TeamConference.objects.filter(team=self.team, season=self.game.season).first()
+        self.features['conf'] = tc.conference.abbrv if tc else 'UNK'
+        otc = TeamConference.objects.filter(team=self.opponent, season=self.game.season).first()
+        self.features['opp_conf'] = otc.conference.abbrv if otc else 'UNK'
+
+
+        ## Get Avg Game Stats
         qs = GameTeamStat.objects.filter(
             gameteam__game__season=self.game.season,
             gameteam__game__day__day_num__lt=self.game.day.day_num,
@@ -389,8 +435,6 @@ class GameTeam(models.Model):
             ]
             for tqs, key, code, opp_stat in fs:
                 self.features[key] = tqs.filter(stat__code=code, opp_stat=opp_stat).aggregate(val=Avg('value'))['val']        
-
-        
 
     def save(self, *args,**kwargs):
         if self.features == None: self.features = {}
@@ -428,3 +472,9 @@ class GameTeamStat(models.Model):
     stat = models.ForeignKey('GameStat', on_delete=models.CASCADE)
     opp_stat = models.BooleanField(verbose_name='Opponent Stat Flag')
     value = models.FloatField()
+
+
+class TourneySeed(models.Model):
+    ''' Represnts a Teams seed in the NCAA tournamnet in a given year '''
+
+
