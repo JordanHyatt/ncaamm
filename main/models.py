@@ -405,8 +405,26 @@ class GameTeam(models.Model):
                 )
 
 
+    def get_mr_seed_num(self):
+        ''' A method to derive most recent seed number at insert into features '''
+        if self.game.game_type != 'NCAA':
+            season = Season.objects.filter(year__lt=self.game.season.year).order_by('-year').first()
+        else:
+            season = self.game.season
+        mr_seed = self.team.tourneyseed_set.filter(season=season).first()
+        mr_seed_num = 17 if mr_seed==None else mr_seed.seed_num
+        self.features['mr_seed_num'] = mr_seed_num
+        # do the same thing for the opponenet
+        mr_seed = self.opponent.tourneyseed_set.filter(season=season).first()
+        mr_seed_num = 17 if mr_seed == None else mr_seed.seed_num
+        self.features['opp_mr_seed_num'] = mr_seed_num
+
+
     def get_features(self):
         ''' A method to derive potential ML features '''
+        ## Get MR Tournament seed
+        self.get_mr_seed_num()
+
         ## Get Ranks
         self.features['avg_rank'] = TeamRank.get_avg_rank(team=self.team, day=self.game.day)
         self.features['opp_avg_rank'] = TeamRank.get_avg_rank(team=self.opponent, day=self.game.day)
@@ -436,8 +454,10 @@ class GameTeam(models.Model):
             for tqs, key, code, opp_stat in fs:
                 self.features[key] = tqs.filter(stat__code=code, opp_stat=opp_stat).aggregate(val=Avg('value'))['val']        
 
-    def save(self, *args,**kwargs):
+    def save(self, *args, skip_methods=True, **kwargs):
         if self.features == None: self.features = {}
+        if skip_methods==True:
+            return super().save(*args, **kwargs)
         self.get_features()
         super().save(*args,**kwargs)
 
@@ -476,5 +496,30 @@ class GameTeamStat(models.Model):
 
 class TourneySeed(models.Model):
     ''' Represnts a Teams seed in the NCAA tournamnet in a given year '''
+    team = models.ForeignKey('Team', on_delete=models.CASCADE, null=True)
+    season = models.ForeignKey('Season', on_delete=models.CASCADE, null=True)
+    seed = models.CharField(max_length=5, null=True)
+    seed_num = models.IntegerField(null=True)
+    seed_code = models.CharField(max_length=1, null=True)
+
+    @classmethod
+    def update_objs(cls):
+        ''' A method to update tourny seeds '''
+        path = os.path.join(settings.BASE_DATA_PATH, 'MNCAATourneySeeds.csv')
+        df = pd.read_csv(path)
+        df['seed_num'] = df.Seed.apply(lambda val: int(val[1:3]))
+        df['seed_code'] = df.Seed.apply(lambda val: val[0])
+        for tup in tqdm(df.itertuples()):
+            season = Season.objects.get(year=tup.Season)
+            team = Team.objects.get(kid=tup.TeamID)
+            obj, _ = cls.objects.update_or_create(
+                team=team, season=season,
+                defaults=dict(seed=tup.Seed, seed_num=tup.seed_num,
+                            seed_code=tup.seed_code)
+            )
+    
+
+    def __str__(self):
+        return f'{self.season} | {self.team} | {self.seed}'
 
 

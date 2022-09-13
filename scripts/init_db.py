@@ -12,3 +12,4 @@ def run(*args):
     TeamRank.update_objs()
     Game.update_objs()
     GameTeam.update_objs()
+    TourneySeed.update_objs()

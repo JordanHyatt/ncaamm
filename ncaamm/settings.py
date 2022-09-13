@@ -137,3 +137,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 BASE_DATA_PATH = r'C:\Users\jorda\OneDrive\Documents\data\2022_march_madness'
+
+
+GRAPH_MODELS = {
+    'all_applications': True,
+    'group_models': True,
+}
